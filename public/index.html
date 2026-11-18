@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Drive to R2 Uploader</title>
+  <script src="https://apis.google.com/js/api.js" async defer></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 520px; margin: 3rem auto; padding: 0 1rem; color: #111; }
+    .card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+    label.field-label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.35rem; color: #334155; }
+    input[type="password"], input[type="text"], select {
+      width: 100%; padding: 0.6rem; margin-bottom: 0.85rem; border: 1px solid #cbd5e1;
+      border-radius: 6px; box-sizing: border-box; font-size: 0.95rem; background: #fff;
+    }
+    .sheet-box { background: #f8fafc; padding: 0.85rem; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 1rem; }
+    .sheet-box input { margin-bottom: 0.5rem; }
+    .sheet-box select { margin-bottom: 0; }
+    .btn-group { display: flex; gap: 0.75rem; margin-bottom: 1rem; }
+    button, .file-label { flex: 1; padding: 0.75rem 1rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; text-align: center; font-size: 0.95rem; }
+    .btn-drive { background: #1a73e8; color: white; }
+    .btn-local { background: #f1f5f9; color: #0f172a; border: 1px solid #cbd5e1; }
+    .result { display: none; margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #e2e8f0; }
+    .url-row { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+    .url-row input { flex: 1; margin-bottom: 0; background: #f8fafc; }
+    .btn-copy { flex: 0 0 auto; background: #10b981; color: white; padding: 0.5rem 1rem; }
+    img { max-width: 100%; max-height: 220px; border-radius: 8px; margin-top: 1rem; display: block; }
+    #status { font-size: 0.9rem; color: #475569; margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2 style="margin-top:0;">Upload Image to R2</h2>
+
+    <label class="field-label" for="secret">Upload Passcode</label>
+    <input type="password" id="secret" placeholder="Enter passcode to load sheets..." />
+
+    <div class="sheet-box">
+      <label class="field-label" for="sheetSelect">Target Google Sheet</label>
+      <input type="text" id="sheetFilter" placeholder="Type to filter 28 sheets..." oninput="filterSheets()" />
+      <select id="sheetSelect" onchange="saveSelectedSheet()">
+        <option value="">Enter passcode above to load sheets...</option>
+      </select>
+    </div>
+
+    <div class="btn-group">
+      <button class="btn-drive" onclick="openDrivePicker()">Pick from Google Drive</button>
+      <label class="file-label btn-local">
+        Choose Local File
+        <input type="file" id="fileInput" accept="image/*" hidden onchange="handleLocalFile(event)" />
+      </label>
+    </div>
+
+    <div id="status"></div>
+
+    <div class="result" id="resultBox">
+      <strong id="resultLabel">Public R2 URL:</strong>
+      <div class="url-row">
+        <input type="text" id="urlOutput" readonly />
+        <button class="btn-copy" id="copyBtn" onclick="copyUrl()">Copy Link</button>
+      </div>
+      <img id="preview" alt="Uploaded preview" />
+    </div>
+  </div>
+
+  <script>
+    const GOOGLE_CLIENT_ID = "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com";
+    const GOOGLE_API_KEY = "YOUR_GOOGLE_API_KEY";
+
+    let allSheets = [];
+    const secretInput = document.getElementById("secret");
+    const sheetSelect = document.getElementById("sheetSelect");
+
+    secretInput.value = localStorage.getItem("r2_secret") || "";
+    if (secretInput.value) loadSheets();
+
+    let loadTimer;
+    secretInput.addEventListener("input", () => {
+      localStorage.setItem("r2_secret", secretInput.value);
+      clearTimeout(loadTimer);
+      loadTimer = setTimeout(loadSheets, 500);
+    });
+
+    async function loadSheets() {
+      if (!secretInput.value) return;
+      sheetSelect.innerHTML = `<option value="">Loading sheets...</option>`;
+      try {
+        const res = await fetch("/api/upload", {
+          headers: { Authorization: `Bearer ${secretInput.value}` },
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) throw new Error(data.error || "Failed to load sheets");
+
+        allSheets = data.sheets || [];
+        renderSheetOptions(allSheets);
+        setStatus("");
+      } catch (err) {
+        sheetSelect.innerHTML = `<option value="">Unlock with valid passcode</option>`;
+        setStatus(`Sheet list: ${err.message}`);
+      }
+    }
+
+    function renderSheetOptions(list) {
+      const savedSheet = localStorage.getItem("r2_selected_sheet");
+      sheetSelect.innerHTML = list.length
+        ? list.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("")
+        : `<option value="">No matching sheets</option>`;
+
+      if (savedSheet && list.includes(savedSheet)) {
+        sheetSelect.value = savedSheet;
+      }
+    }
+
+    function filterSheets() {
+      const query = document.getElementById("sheetFilter").value.toLowerCase();
+      const filtered = allSheets.filter((name) => name.toLowerCase().includes(query));
+      renderSheetOptions(filtered);
+    }
+
+    function saveSelectedSheet() {
+      localStorage.setItem("r2_selected_sheet", sheetSelect.value);
+    }
+
+    function openDrivePicker() {
+      if (!sheetSelect.value) {
+        alert("Please select a target Google Sheet first.");
+        return;
+      }
+      if (GOOGLE_CLIENT_ID.startsWith("YOUR_")) {
+        alert("Configure GOOGLE_CLIENT_ID and GOOGLE_API_KEY in index.html first, or use 'Choose Local File'.");
+        return;
+      }
+      gapi.load("picker", () => {
+        const tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: GOOGLE_CLIENT_ID,
+          scope: "https://www.googleapis.com/auth/drive.file",
+          callback: (tokenResponse) => {
+            if (tokenResponse.error) return;
+            const accessToken = tokenResponse.access_token;
+            const picker = new google.picker.PickerBuilder()
+              .addView(new google.picker.DocsView(google.picker.ViewId.DOCS_IMAGES))
+              .setOAuthToken(accessToken)
+              .setDeveloperKey(GOOGLE_API_KEY)
+              .setCallback(async (data) => {
+                if (data.action === google.picker.Action.PICKED) {
+                  const doc = data.docs[0];
+                  setStatus(`Fetching "${doc.name}" from Google Drive...`);
+                  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${doc.id}?alt=media`, {
+                    headers: { Authorization: `Bearer ${accessToken}` },
+                  });
+                  const blob = await res.blob();
+                  const file = new File([blob], doc.name, { type: doc.mimeType });
+                  await uploadToR2(file);
+                }
+              })
+              .build();
+            picker.setVisible(true);
+          },
+        });
+        tokenClient.requestAccessToken();
+      });
+    }
+
+    function handleLocalFile(event) {
+      const file = event.target.files[0];
+      if (file) uploadToR2(file);
+    }
+
+    async function uploadToR2(file) {
+      const targetSheet = sheetSelect.value;
+      if (!targetSheet) {
+        setStatus("Error: Please select a target Google Sheet.");
+        return;
+      }
+
+      setStatus(`Uploading "${file.name}" to R2 and logging to "${targetSheet}"...`);
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("sheetKey", targetSheet);
+
+      try {
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${secretInput.value}` },
+          body: formData,
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Upload failed");
+
+        document.getElementById("resultLabel").textContent = `Saved to "${data.sheet}":`;
+        document.getElementById("urlOutput").value = data.url;
+        document.getElementById("preview").src = data.url;
+        document.getElementById("resultBox").style.display = "block";
+        setStatus("Done!");
+      } catch (err) {
+        setStatus(`Error: ${err.message}`);
+      }
+    }
+
+    function copyUrl() {
+      navigator.clipboard.writeText(document.getElementById("urlOutput").value);
+      const btn = document.getElementById("copyBtn");
+      btn.textContent = "Copied!";
+      setTimeout(() => (btn.textContent = "Copy Link"), 2000);
+    }
+
+    function setStatus(msg) {
+      document.getElementById("status").textContent = msg;
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
+    }
+  </script>
+</body>
+</html>
