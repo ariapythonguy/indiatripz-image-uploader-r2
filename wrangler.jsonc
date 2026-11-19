@@ -14,7 +14,7 @@
     }
   ],
   "vars": {
-    "SHEETS_WEBHOOK_URL": "https://script.google.com/macros/s/AKfycbxDkdKAqP2jhpN-EDemtm6fVrcOObwvajggQC5hys8H5zass7b-P7VSmwQOiAzHHa6MIQ/exec",
+    "SHEETS_WEBHOOK_URL": "https://script.google.com/macros/s/AKfycbyhNugkXY4-W4tNTYGZyOFfJGW0yKnO4oIjAoPVG26Xkgsnp2dAovgpNyTWHuy8z4Ba9g/exec",
     "PUBLIC_R2_URL": "https://pub-c8265e53dfef427f9b4ed2c84c48ed11.r2.dev",
     "UPLOAD_SECRET": "LetsWork01"
   }
