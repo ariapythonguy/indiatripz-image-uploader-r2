@@ -9,7 +9,7 @@ function getVerifiedSecret(request, env) {
   return received || expected;
 }
 
-// GET /api/upload -> returns the list of 21 sheet labels from Apps Script
+// GET /api/upload -> returns sheet list, or package rows when ?sheetKey=... is passed
 export async function onRequestGet(context) {
   const { request, env } = context;
 
@@ -27,10 +27,16 @@ export async function onRequestGet(context) {
       throw new Error("SHEETS_WEBHOOK_URL is not configured in Cloudflare");
     }
 
-    const url = new URL(webhookUrl);
-    url.searchParams.set("secret", secret);
+    const incomingUrl = new URL(request.url);
+    const sheetKey = incomingUrl.searchParams.get("sheetKey");
 
-    const res = await fetch(url.toString(), { redirect: "follow" });
+    const scriptUrl = new URL(webhookUrl);
+    scriptUrl.searchParams.set("secret", secret);
+    if (sheetKey) {
+      scriptUrl.searchParams.set("sheetKey", sheetKey);
+    }
+
+    const res = await fetch(scriptUrl.toString(), { redirect: "follow" });
     const text = await res.text();
 
     let data;
@@ -55,7 +61,7 @@ export async function onRequestGet(context) {
   }
 }
 
-// POST /api/upload -> uploads to R2 and logs to the chosen Google Sheet
+// POST /api/upload -> uploads 4 images to R2 and writes [URL1..URL4] to J:M on the selected row
 export async function onRequestPost(context) {
   const { request, env } = context;
 
@@ -69,43 +75,52 @@ export async function onRequestPost(context) {
 
   try {
     const formData = await request.formData();
-    const file = formData.get("file");
-    const sheetKey = formData.get("sheetKey");
+    const files = formData.getAll("files").filter((f) => f && typeof f !== "string");
+    const sheetKey = (formData.get("sheetKey") || "").trim();
+    const row = Number(formData.get("row"));
+    const pkgId = (formData.get("pkgId") || "").trim();
 
-    if (!file || typeof file === "string") {
-      return new Response(JSON.stringify({ error: "No image file provided" }), {
+    if (files.length !== 4) {
+      return new Response(JSON.stringify({ error: `Please select exactly 4 images (received ${files.length})` }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });
     }
 
-    if (!sheetKey) {
-      return new Response(JSON.stringify({ error: "Please select a target Google Sheet" }), {
+    if (!sheetKey || !row || row < 2) {
+      return new Response(JSON.stringify({ error: "Please select a target sheet and package row" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });
     }
-
-    // 1. Upload to R2
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const key = `${Date.now()}-${safeName}`;
-
-    await env.MY_BUCKET.put(key, await file.arrayBuffer(), {
-      httpMetadata: { contentType: file.type || "application/octet-stream" },
-    });
 
     const baseUrl = (env.PUBLIC_R2_URL || "").trim().replace(/\/$/, "");
-    const publicUrl = `${baseUrl}/${key}`;
+    const batchStamp = Date.now();
 
-    // 2. Log URL to the selected Google Sheet
+    // 1. Upload all 4 images to R2 in parallel (preserving order 1..4)
+    const publicUrls = await Promise.all(
+      files.map(async (file, index) => {
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const key = `${batchStamp}-${index + 1}-${safeName}`;
+
+        await env.MY_BUCKET.put(key, await file.arrayBuffer(), {
+          httpMetadata: { contentType: file.type || "application/octet-stream" },
+        });
+
+        return `${baseUrl}/${key}`;
+      })
+    );
+
+    // 2. Write [URL 1, URL 2, URL 3, URL 4] to Columns J, K, L, M of the selected row
     const sheetRes = await fetch(env.SHEETS_WEBHOOK_URL.trim(), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       redirect: "follow",
       body: JSON.stringify({
-        filename: file.name,
-        url: publicUrl,
         sheetKey,
+        row,
+        pkgId,
+        urls: publicUrls,
         secret,
       }),
     });
@@ -115,16 +130,22 @@ export async function onRequestPost(context) {
     try {
       sheetResult = JSON.parse(sheetText);
     } catch {
-      throw new Error(`Uploaded to R2 (${publicUrl}), but Apps Script returned non-JSON (HTTP ${sheetRes.status})`);
+      throw new Error(`Uploaded to R2, but Apps Script returned non-JSON (HTTP ${sheetRes.status})`);
     }
 
     if (sheetResult.error) {
-      throw new Error(`Uploaded to R2, but Sheet failed: ${sheetResult.error}`);
+      throw new Error(`Uploaded to R2, but Sheet update failed: ${sheetResult.error}`);
     }
 
-    return new Response(JSON.stringify({ url: publicUrl, filename: file.name, sheet: sheetKey }), {
-      headers: { "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({
+        urls: publicUrls,
+        sheet: sheetKey,
+        row,
+        pkgId,
+      }),
+      { headers: { "Content-Type": "application/json" } }
+    );
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message }), {
       status: 500,
