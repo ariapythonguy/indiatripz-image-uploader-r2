@@ -1,6 +1,9 @@
 function isAuthorized(request, env) {
-  if (!env.UPLOAD_SECRET) return true;
-  return request.headers.get("Authorization") === `Bearer ${env.UPLOAD_SECRET}`;
+  const expected = (env.UPLOAD_SECRET || "").trim();
+  if (!expected) return true;
+
+  const authHeader = (request.headers.get("Authorization") || "").trim();
+  return authHeader === `Bearer ${expected}`;
 }
 
 // GET /api/upload -> returns the list of 28 sheet labels from Apps Script
@@ -14,8 +17,8 @@ export async function onRequestGet(context) {
     });
   }
 
-  const url = new URL(env.SHEETS_WEBHOOK_URL);
-  url.searchParams.set("secret", env.UPLOAD_SECRET || "");
+  const url = new URL(env.SHEETS_WEBHOOK_URL.trim());
+  url.searchParams.set("secret", (env.UPLOAD_SECRET || "").trim());
 
   const res = await fetch(url.toString());
   const data = await res.json();
@@ -62,18 +65,18 @@ export async function onRequestPost(context) {
     httpMetadata: { contentType: file.type || "application/octet-stream" },
   });
 
-  const baseUrl = env.PUBLIC_R2_URL.replace(/\/$/, "");
+  const baseUrl = env.PUBLIC_R2_URL.trim().replace(/\/$/, "");
   const publicUrl = `${baseUrl}/${key}`;
 
   // 2. Log URL to the selected Google Sheet
-  const sheetRes = await fetch(env.SHEETS_WEBHOOK_URL, {
+  const sheetRes = await fetch(env.SHEETS_WEBHOOK_URL.trim(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       filename: file.name,
       url: publicUrl,
       sheetKey,
-      secret: env.UPLOAD_SECRET || "",
+      secret: (env.UPLOAD_SECRET || "").trim(),
     }),
   });
 
