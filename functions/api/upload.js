@@ -1,17 +1,20 @@
-function isAuthorized(request, env) {
+function getVerifiedSecret(request, env) {
   const expected = (env.UPLOAD_SECRET || "").trim();
-  if (!expected) return true;
-
   const authHeader = (request.headers.get("Authorization") || "").trim();
-  const received = authHeader.replace(/^Bearer\s+/i, "");
-  return received === expected;
+  const received = authHeader.replace(/^Bearer\s+/i, "").trim();
+
+  if (expected && received !== expected) {
+    return null;
+  }
+  return received || expected;
 }
 
-// GET /api/upload -> returns the list of 28 sheet labels from Apps Script
+// GET /api/upload -> returns the list of 21 sheet labels from Apps Script
 export async function onRequestGet(context) {
   const { request, env } = context;
 
-  if (!isAuthorized(request, env)) {
+  const secret = getVerifiedSecret(request, env);
+  if (secret === null) {
     return new Response(JSON.stringify({ error: "Invalid passcode" }), {
       status: 401,
       headers: { "Content-Type": "application/json" },
@@ -19,15 +22,15 @@ export async function onRequestGet(context) {
   }
 
   try {
-    if (!env.SHEETS_WEBHOOK_URL) {
+    const webhookUrl = (env.SHEETS_WEBHOOK_URL || "").trim();
+    if (!webhookUrl) {
       throw new Error("SHEETS_WEBHOOK_URL is not configured in Cloudflare");
     }
 
-    const secretToSend = (env.UPLOAD_SECRET || "").trim();
-    const url = new URL(env.SHEETS_WEBHOOK_URL.trim());
-    url.searchParams.set("secret", secretToSend);
+    const url = new URL(webhookUrl);
+    url.searchParams.set("secret", secret);
 
-    const res = await fetch(url.toString());
+    const res = await fetch(url.toString(), { redirect: "follow" });
     const text = await res.text();
 
     let data;
@@ -38,7 +41,7 @@ export async function onRequestGet(context) {
     }
 
     if (data.error) {
-      throw new Error(`${data.error} (Worker sent secret length: ${secretToSend.length})`);
+      throw new Error(data.error);
     }
 
     return new Response(JSON.stringify(data), {
@@ -56,7 +59,8 @@ export async function onRequestGet(context) {
 export async function onRequestPost(context) {
   const { request, env } = context;
 
-  if (!isAuthorized(request, env)) {
+  const secret = getVerifiedSecret(request, env);
+  if (secret === null) {
     return new Response(JSON.stringify({ error: "Invalid passcode" }), {
       status: 401,
       headers: { "Content-Type": "application/json" },
@@ -97,11 +101,12 @@ export async function onRequestPost(context) {
     const sheetRes = await fetch(env.SHEETS_WEBHOOK_URL.trim(), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      redirect: "follow",
       body: JSON.stringify({
         filename: file.name,
         url: publicUrl,
         sheetKey,
-        secret: (env.UPLOAD_SECRET || "").trim(),
+        secret,
       }),
     });
 
