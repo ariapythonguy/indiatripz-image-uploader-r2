@@ -1,17 +1,22 @@
-function isAuthorized(request, env) {
+function authDebug(request, env) {
   const expected = (env.UPLOAD_SECRET || "").trim();
-  if (!expected) return true;
-
   const authHeader = (request.headers.get("Authorization") || "").trim();
-  return authHeader === `Bearer ${expected}`;
+  const received = authHeader.replace(/^Bearer\s+/i, "");
+// above is new authdebug code to get error
+
+  return {
+    ok: !expected || received === expected,
+    info: `expectedLen=${expected.length} (${expected.slice(0, 2)}..${expected.slice(-2)}), receivedLen=${received.length} (${received.slice(0, 2)}..${received.slice(-2)})`,
+  };
 }
 
 // GET /api/upload -> returns the list of 28 sheet labels from Apps Script
 export async function onRequestGet(context) {
   const { request, env } = context;
-
-  if (!isAuthorized(request, env)) {
-    return new Response(JSON.stringify({ error: "Invalid passcode" }), {
+// new authDebug code to check error
+  const auth = authDebug(request, env);
+  if (!auth.ok) {
+    return new Response(JSON.stringify({ error: `Invalid passcode [${auth.info}]` }), {
       status: 401,
       headers: { "Content-Type": "application/json" },
     });
@@ -32,8 +37,9 @@ export async function onRequestGet(context) {
 export async function onRequestPost(context) {
   const { request, env } = context;
 
-  if (!isAuthorized(request, env)) {
-    return new Response(JSON.stringify({ error: "Invalid passcode" }), {
+  const auth = authDebug(request, env);
+  if (!auth.ok) {
+    return new Response(JSON.stringify({ error: `Invalid passcode [${auth.info}]` }), {
       status: 401,
       headers: { "Content-Type": "application/json" },
     });
