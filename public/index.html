@@ -258,11 +258,16 @@
       gapi.load("picker", () => {
         const tokenClient = google.accounts.oauth2.initTokenClient({
           client_id: GOOGLE_CLIENT_ID,
-          scope: "https://www.googleapis.com/auth/drive.file",
+          scope: "https://www.googleapis.com/auth/drive.readonly",
           callback: (tokenResponse) => {
-            if (tokenResponse.error) return;
+            if (tokenResponse.error) {
+              setStatus(`Google Auth Error: ${tokenResponse.error}`);
+              return;
+            }
             const accessToken = tokenResponse.access_token;
-            const view = new google.picker.DocsView(google.picker.ViewId.DOCS_IMAGES);
+            const view = new google.picker.DocsView(google.picker.ViewId.DOCS_IMAGES)
+              .setIncludeFolders(true);
+
             const picker = new google.picker.PickerBuilder()
               .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
               .addView(view)
@@ -275,23 +280,32 @@
                     return;
                   }
                   setStatus("Downloading 4 images from Google Drive...");
-                  const downloaded = await Promise.all(
-                    data.docs.map(async (doc) => {
-                      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${doc.id}?alt=media`, {
-                        headers: { Authorization: `Bearer ${accessToken}` },
-                      });
-                      const blob = await res.blob();
-                      return new File([blob], doc.name, { type: doc.mimeType });
-                    })
-                  );
-                  setSelectedFiles(downloaded);
+                  try {
+                    const downloaded = await Promise.all(
+                      data.docs.map(async (doc) => {
+                        const res = await fetch(
+                          `https://www.googleapis.com/drive/v3/files/${doc.id}?alt=media&supportsAllDrives=true`,
+                          { headers: { Authorization: `Bearer ${accessToken}` } }
+                        );
+                        if (!res.ok) {
+                          const errText = await res.text();
+                          throw new Error(`Drive download failed for "${doc.name}" (HTTP ${res.status}): ${errText}`);
+                        }
+                        const blob = await res.blob();
+                        return new File([blob], doc.name, { type: doc.mimeType || blob.type });
+                      })
+                    );
+                    setSelectedFiles(downloaded);
+                  } catch (err) {
+                    setStatus(`Error: ${err.message}`);
+                  }
                 }
               })
               .build();
             picker.setVisible(true);
           },
         });
-        tokenClient.requestAccessToken();
+        tokenClient.requestAccessToken({ prompt: "consent" });
       });
     }
 
