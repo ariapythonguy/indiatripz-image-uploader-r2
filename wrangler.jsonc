@@ -11,5 +11,9 @@
       "binding": "MY_BUCKET",
       "bucket_name": "images-indiatripz"
     }
-  ]
+  ],
+  "vars": {
+    "SHEETS_WEBHOOK_URL": "https://script.google.com/macros/s/AKfycbxDkdKAqP2jhpN-EDemtm6fVrcOObwvajggQC5hys8H5zass7b-P7VSmwQOiAzHHa6MIQ/exec",
+    "PUBLIC_R2_URL": "YOUR_PUBLIC_R2_URL_HERE"
+  }
 }
