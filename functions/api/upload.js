@@ -23,8 +23,9 @@ export async function onRequestGet(context) {
       throw new Error("SHEETS_WEBHOOK_URL is not configured in Cloudflare");
     }
 
+    const secretToSend = (env.UPLOAD_SECRET || "").trim();
     const url = new URL(env.SHEETS_WEBHOOK_URL.trim());
-    url.searchParams.set("secret", (env.UPLOAD_SECRET || "").trim());
+    url.searchParams.set("secret", secretToSend);
 
     const res = await fetch(url.toString());
     const text = await res.text();
@@ -34,6 +35,10 @@ export async function onRequestGet(context) {
       data = JSON.parse(text);
     } catch {
       throw new Error(`Apps Script returned non-JSON (HTTP ${res.status})`);
+    }
+
+    if (data.error) {
+      throw new Error(`${data.error} (Worker sent secret length: ${secretToSend.length})`);
     }
 
     return new Response(JSON.stringify(data), {
