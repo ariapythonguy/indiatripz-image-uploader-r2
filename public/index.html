@@ -29,6 +29,14 @@
     .slot { border: 1px dashed #cbd5e1; border-radius: 8px; padding: 0.4rem; text-align: center; background: #f8fafc; font-size: 0.75rem; color: #64748b; }
     .slot img { width: 100%; height: 75px; object-fit: cover; border-radius: 4px; display: block; margin-bottom: 0.25rem; }
     .slot-col { font-weight: 700; color: #0f172a; }
+    .slot.has-file { border-style: solid; border-color: #94a3b8; background: #fff; cursor: grab; transition: transform 0.12s, border-color 0.12s, background 0.12s; }
+    .slot.has-file:active { cursor: grabbing; }
+    .slot.dragging { opacity: 0.45; transform: scale(0.97); }
+    .slot.drag-over { border: 2px dashed #1a73e8; background: #eff6ff; }
+    .slot-actions { display: flex; justify-content: center; gap: 0.25rem; margin-top: 0.3rem; }
+    .btn-move { flex: 0 0 auto; padding: 0.15rem 0.45rem; font-size: 0.72rem; border-radius: 4px; background: #e2e8f0; color: #0f172a; border: none; cursor: pointer; }
+    .btn-move:hover { background: #cbd5e1; }
+    .drag-hint { font-size: 0.78rem; color: #64748b; margin-top: 0.35rem; text-align: right; }
     .result { display: none; margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid #e2e8f0; }
     .url-row { display: flex; gap: 0.5rem; margin-top: 0.45rem; align-items: center; }
     .col-badge { font-weight: 700; font-size: 0.8rem; background: #e2e8f0; padding: 0.35rem 0.55rem; border-radius: 5px; }
@@ -76,6 +84,7 @@
       <div class="slot"><div class="slot-col">Col L</div>Image 3</div>
       <div class="slot"><div class="slot-col">Col M</div>Image 4</div>
     </div>
+    <div class="drag-hint" id="dragHint" style="display:none;">Drag &amp; drop cards (or use ← →) to reorder Columns J, K, L, M</div>
 
     <button class="btn-upload" id="uploadBtn" disabled onclick="uploadBatchToR2()">
       Upload 4 Images & Update Row
@@ -97,6 +106,7 @@
     let allSheets = [];
     let allPackages = [];
     let selectedFiles = [];
+    let draggedIndex = null;
 
     const secretInput = document.getElementById("secret");
     const sheetSelect = document.getElementById("sheetSelect");
@@ -232,14 +242,82 @@
 
     function renderPreviews() {
       const grid = document.getElementById("previewGrid");
+      const hint = document.getElementById("dragHint");
+      hint.style.display = selectedFiles.length > 1 ? "block" : "none";
+
       grid.innerHTML = COL_LABELS.map((col, idx) => {
         const file = selectedFiles[idx];
         if (!file) {
           return `<div class="slot"><div class="slot-col">${col}</div>Image ${idx + 1}</div>`;
         }
         const objUrl = URL.createObjectURL(file);
-        return `<div class="slot"><img src="${objUrl}" alt="${escapeHtml(file.name)}" /><div class="slot-col">${col}</div>${escapeHtml(file.name.slice(0, 14))}</div>`;
+        const leftBtn = idx > 0
+          ? `<button type="button" class="btn-move" title="Move left" onclick="moveSlot(${idx}, ${idx - 1})">←</button>`
+          : "";
+        const rightBtn = idx < selectedFiles.length - 1
+          ? `<button type="button" class="btn-move" title="Move right" onclick="moveSlot(${idx}, ${idx + 1})">→</button>`
+          : "";
+
+        return `
+          <div class="slot has-file"
+               draggable="true"
+               ondragstart="onDragStart(event, ${idx})"
+               ondragover="onDragOver(event)"
+               ondragenter="onDragEnter(event)"
+               ondragleave="onDragLeave(event)"
+               ondrop="onDrop(event, ${idx})"
+               ondragend="onDragEnd(event)">
+            <img src="${objUrl}" alt="${escapeHtml(file.name)}" draggable="false" />
+            <div class="slot-col">${col}</div>
+            <div title="${escapeHtml(file.name)}">${escapeHtml(file.name.slice(0, 14))}</div>
+            <div class="slot-actions">${leftBtn}${rightBtn}</div>
+          </div>`;
       }).join("");
+    }
+
+    function onDragStart(event, index) {
+      draggedIndex = index;
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", String(index));
+      event.currentTarget.classList.add("dragging");
+    }
+
+    function onDragOver(event) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+    }
+
+    function onDragEnter(event) {
+      event.preventDefault();
+      const slot = event.currentTarget;
+      if (slot.classList.contains("has-file")) {
+        slot.classList.add("drag-over");
+      }
+    }
+
+    function onDragLeave(event) {
+      event.currentTarget.classList.remove("drag-over");
+    }
+
+    function onDrop(event, targetIndex) {
+      event.preventDefault();
+      event.currentTarget.classList.remove("drag-over");
+      if (draggedIndex === null || draggedIndex === targetIndex) return;
+      moveSlot(draggedIndex, targetIndex);
+    }
+
+    function onDragEnd() {
+      draggedIndex = null;
+      document.querySelectorAll(".slot").forEach((el) => {
+        el.classList.remove("dragging", "drag-over");
+      });
+    }
+
+    function moveSlot(fromIndex, toIndex) {
+      if (toIndex < 0 || toIndex >= selectedFiles.length) return;
+      const [moved] = selectedFiles.splice(fromIndex, 1);
+      selectedFiles.splice(toIndex, 0, moved);
+      renderPreviews();
     }
 
     function updateUploadButtonState() {
